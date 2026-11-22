@@ -10,8 +10,8 @@ Newest entry at the top. At the end of every work session (human or Claude), add
 |---|---|---|
 | Env + rule tests | P1 | ✅ scaffold done; 34 tests pass; rules await team sign-off |
 | Pygame play (`scripts/play.py`) | P1 | ✅ basic version |
-| A\* agent | P1 | ⬜ |
-| Eval harness + seeds | P2 | ✅ scaffold (`experiments/harness.py`, `seeds.py`) |
+| A\* agent | P1 | ✅ `agents/astar_agent.py`; val: 46% success / 40% partial / 14% lost |
+| Eval harness + seeds | P2 | ✅ `harness.py`, `seeds.py`, `run_benchmark.py` (CLI → CSV) |
 | Q-learning (2 independent learners) | P2 | ⬜ |
 | Plots / tables | P2 | ⬜ |
 | Data collection | P3 | ⬜ |
@@ -30,6 +30,12 @@ Newest entry at the top. At the end of every work session (human or Claude), add
 - True simulator: ~3.4k steps/s, so MPC with N=200, H=6 takes about 350 ms per decision on CPU. Optimize later if needed (vectorize zombie moves, or roll out N states as a batch).
 
 ---
+
+## 2026-11-22: A\* baseline (Exp 1) + watch mode
+- `agents/astar_agent.py`: one A\* planner per survivor, replanning every step. Costs: infection +6, tile next to a zombie +4. Walls, zombies and the partner's tile are impassable. If the partner is on the closed exit, the goal becomes the exit's neighbours. A reactive rule shoots whenever a zombie is in its sights. Anti-deadlock: after 2 blocked moves it takes one random legal move. Debug routes are stored in `agent.paths`.
+- `agents.make_agent(name)` and the `AGENTS` registry. `scripts/watch.py` lets you watch any agent play itself, with its paths overlaid. `experiments/run_benchmark.py` runs any agent, split and config, and writes `results/exp1_<agent>_<config>_<split>.csv`.
+- A\* on val (100 maps): **46% both escape, 40% one escapes, 14% both die**, return 4.2 ± 17.6, about 21 steps, 0.4 ms/decision. Random agent: 0% success.
+- Next: run A\* on the test split, the `no_coord` ablation and the shifted configs; Q-learning (P2); data collection (P3).
 
 ## 2026-11-22: Survivors can die individually
 - **Rule change (spec updated):** the episode now ends only when no survivor is left. A dead survivor stays down as an inert body, and the partner can still escape alone (partial result, +10). Each death costs −10. The original rule is available as `EnvConfig(end_on_first_death=True)`.

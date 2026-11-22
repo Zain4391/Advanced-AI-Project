@@ -13,6 +13,8 @@ python -m venv .venv && .venv/Scripts/python -m pip install -e ".[dev]"   # Wind
 .venv/Scripts/python -m pytest -q                 # all rule + determinism tests
 .venv/Scripts/python -m experiments.harness       # smoke test: random agent on 50 val seeds
 .venv/Scripts/python scripts/play.py --seed 0     # keyboard play
+.venv/Scripts/python scripts/watch.py --agent astar --auto     # watch an agent play itself
+.venv/Scripts/python -m experiments.run_benchmark --agent astar --split val   # headless eval -> results/*.csv
 ```
 
 ## Hard rules

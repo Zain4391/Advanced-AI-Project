@@ -337,14 +337,21 @@ class Renderer:
 
     # -------------------------------------------------------------- drawing ---
     def draw(self, surface, s: EnvState, *, pending=(None, None), seed=None, total_return=0.0,
-             banner: tuple[str, str, tuple] | None = None, now: float | None = None) -> None:
+             banner: tuple[str, str, tuple] | None = None, now: float | None = None,
+             paths=None, **panel_kw) -> None:
+        """Board + panel. `paths` = [cells_s1, cells_s2] planned routes to overlay (or None).
+        Extra keywords go to draw_panel (subtitle, controls, action_label)."""
         now = time.perf_counter() if now is None else now
         surface.fill(C["bg"])
         self.draw_board(surface, s, (0, 0), now=now)
+        if paths and not s.done and now - self.step_time >= ANIM_TIME:
+            for i, cells in enumerate(paths):
+                if cells and s.active[i]:
+                    self.draw_path(surface, [tuple(s.surv_pos[i])] + list(cells), SP.SURVIVOR_VARIANTS[i]["C"], now=now)
         if banner and now - self.step_time > 0.6:
             self.draw_banner(surface, pygame.Rect(0, 0, self.board_px, self.board_px), *banner)
         self.draw_panel(surface, pygame.Rect(self.board_px, 0, self.panel_w, self.board_px), s,
-                        pending=pending, seed=seed, total_return=total_return, now=now)
+                        pending=pending, seed=seed, total_return=total_return, now=now, **panel_kw)
 
     def draw_board(self, surface, s: EnvState, origin=(0, 0), now: float | None = None) -> None:
         now = time.perf_counter() if now is None else now
@@ -534,7 +541,11 @@ class Renderer:
 
     # ---------------------------------------------------------------- panel ---
     def draw_panel(self, surface, rect: pygame.Rect, s: EnvState, *, pending=(None, None),
-                   seed=None, total_return=0.0, now: float | None = None, show_controls=True) -> None:
+                   seed=None, total_return=0.0, now: float | None = None,
+                   subtitle: str = "Get both survivors to the helipad.",
+                   controls: list[tuple[str, str, tuple]] | None = None,
+                   action_label: str = "READY") -> None:
+        """controls: rows of (tag, text, tag_colour); None = the human keyboard controls; [] = hide."""
         now = time.perf_counter() if now is None else now
         x0, y0, w = rect.x, rect.y, rect.w
         pygame.draw.rect(surface, C["panel"], rect)
@@ -544,7 +555,7 @@ class Renderer:
         inner = w - 2 * pad
 
         _text(surface, self.f_title, "ZOMBIE OUTBREAK", (x, y0 + 14), C["title"])
-        _text(surface, self.f_small, "Get both survivors to the helipad.", (x, y0 + 52), C["muted"], shadow=False)
+        _text(surface, self.f_small, subtitle, (x, y0 + 52), C["muted"], shadow=False)
 
         # step bar
         y = y0 + 82
@@ -589,7 +600,7 @@ class Renderer:
             elif pending[i] is None:
                 status, scol = "choosing" + "." * (int(now * 3) % 4), C["muted"]
             else:
-                status, scol = f"READY: {ACTION_NAMES[pending[i]].upper()}", C["good"]
+                status, scol = f"{action_label}: {ACTION_NAMES[pending[i]].upper()}", C["good"]
             _text(surface, self.f_small, status, (tx + 90, card.y + 62), scol, shadow=False)
             if not (s.evacuated[i] or s.health[i] <= 0 or s.done):
                 if s.ammo[i] <= 0:
@@ -602,13 +613,14 @@ class Renderer:
             y += 114
 
         # controls
-        if show_controls:
+        rows = controls if controls is not None else [
+            ("P1", "Arrows move   Space shoot   Enter wait", SP.SURVIVOR_VARIANTS[0]["C"]),
+            ("P2", "WASD move   F shoot   Q wait", SP.SURVIVOR_VARIANTS[1]["C"]),
+            ("", "R restart   N next map   Esc quit", C["muted"])]
+        if rows:
             y += 2
-            box = pygame.Rect(x, y, inner, 96)
+            box = pygame.Rect(x, y, inner, 12 + 28 * len(rows))
             pygame.draw.rect(surface, C["panel_card"], box, border_radius=8)
-            rows = [("P1", "Arrows move   Space shoot   Enter wait", SP.SURVIVOR_VARIANTS[0]["C"]),
-                    ("P2", "WASD move   F shoot   Q wait", SP.SURVIVOR_VARIANTS[1]["C"]),
-                    ("", "R restart   N next map   Esc quit", C["muted"])]
             for k, (tag, txt, col) in enumerate(rows):
                 yy = box.y + 12 + k * 28
                 if tag:
@@ -618,6 +630,27 @@ class Renderer:
         foot = f"map seed {seed}" if seed is not None else ""
         _text(surface, self.f_small, foot, (x, rect.bottom - 30), C["muted"], shadow=False)
         _text(surface, self.f_small, f"team return {total_return:+.1f}", (x + inner - 130, rect.bottom - 30), C["muted"], shadow=False)
+
+    def draw_path(self, surface, cells, color, origin=(0, 0), now: float | None = None) -> None:
+        """Dashed route through grid cells [(r, c), ...] with a marker on the destination."""
+        if len(cells) < 2:
+            return
+        now = time.perf_counter() if now is None else now
+        c = self.cell
+        layer = pygame.Surface((self.board_px, self.board_px), pygame.SRCALPHA)
+        pts = [(col * c + c // 2, r * c + c // 2) for r, col in cells]
+        w = max(3, c // 16)
+        for a, b in zip(pts, pts[1:]):
+            pygame.draw.line(layer, (*color, 150), a, b, w)
+        # marching dots show direction of travel
+        for k in range(len(pts) - 1):
+            ph = (now * 1.5) % 1.0
+            x = pts[k][0] + (pts[k + 1][0] - pts[k][0]) * ph
+            y = pts[k][1] + (pts[k + 1][1] - pts[k][1]) * ph
+            pygame.draw.circle(layer, (255, 255, 255, 200), (int(x), int(y)), w)
+        ex, ey = pts[-1]
+        pygame.draw.circle(layer, (*color, 220), (ex, ey), c // 6, w)
+        surface.blit(layer, origin)
 
     def draw_banner(self, surface, rect: pygame.Rect, title: str, subtitle: str, color) -> None:
         dim = pygame.Surface(rect.size, pygame.SRCALPHA)
