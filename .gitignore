@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# Virtual envs (do NOT name a venv "env/" — that is our package)
+.venv/
+venv/
+
+# Data and large artifacts (share via Drive/Kaggle, not git)
+data/
+*.npz
+checkpoints/
+*.pt
+runs/
+
+# Results: keep CSVs and figures, ignore scratch
+results/scratch/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/settings.local.json
