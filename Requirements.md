@@ -7,7 +7,7 @@ Team: 3 students | Timeline: 1 week | Stack: Python + Pygame (NumPy, PyTorch, Gy
 
 ## 1. Project Summary
 
-A survivor (optionally two cooperating survivors) on a small city grid must reach an evacuation point before a spreading infection and chasing zombies kill them. The infection spread and zombie movement are the dynamics a learned world model must predict, and a planner uses that model to imagine futures before acting.
+Two cooperating survivors (a multi-agent system) on a small city grid must both reach an evacuation point before a spreading infection and chasing zombies kill them. The infection spread and zombie movement are the dynamics a learned world model must predict, and a planner uses that model to imagine futures before acting.
 
 **Research question:** Can an agent learn an internal model of the game world, imagine future states, and use them to decide better than conventional agents? Does a more accurate world model necessarily lead to better decisions?
 
@@ -19,22 +19,23 @@ A survivor (optionally two cooperating survivors) on a small city grid must reac
 
 ## 2. Game Environment (Course Component 1)
 
-| Item                  | Requirement                                                                                                                                                                                                             |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Grid                  | 8x8 (10x10 if time allows), walls, procedurally generated from a seed; a path from start to exit must exist at step 0                                                                                                   |
-| Agents                | 1 survivor (core). Second cooperative survivor is a stretch goal, decided at the end of Day 2                                                                                                                           |
-| Survivor stats        | Health 0-5, ammo 0-3                                                                                                                                                                                                    |
-| Objects (>= 3)        | Zombie, medkit, ammo crate, wall, evacuation point                                                                                                                                                                      |
-| Dynamic events (>= 2) | (1) Infection spreads to adjacent clean tiles with probability p per step. (2) Zombies move toward the nearest survivor with probability 0.7, otherwise randomly. (3) Supply drops appear every K steps on a clean tile |
-| Actions               | Up, down, left, right, wait, shoot (kills nearest zombie within 2 tiles in a straight line, costs 1 ammo)                                                                                                               |
-| Damage                | 1 health per step on an infected tile; 1 health per step while adjacent to a zombie                                                                                                                                     |
-| Pickups               | Medkit +2 health, ammo crate +1 ammo, applied on entering the tile                                                                                                                                                      |
-| Win                   | Reach the evacuation tile (never infected)                                                                                                                                                                              |
-| Lose                  | Health reaches 0, or the 100-step limit is reached                                                                                                                                                                      |
-| Reward                | +20 exit, -20 death, -0.1 per step, -1 per damage taken, +2 per zombie killed, +1 per pickup (shared reward if two survivors)                                                                                           |
-| Reproducibility       | `reset(seed=...)` fixes the map, zombie starts and all random events; experiments use fixed seed lists                                                                                                                  |
-| Observability         | Full observation in the base game                                                                                                                                                                                       |
-| Playable              | Keyboard control in Pygame (arrow keys, space to shoot, key for wait)                                                                                                                                                   |
+| Item                                        | Requirement                                                                                                                                                                                                                                                    |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Grid                                        | 8x8 (10x10 if time allows), walls, procedurally generated from a seed; a path from start to exit must exist at step 0                                                                                                                                          |
+| Agents                                      | 2 survivors (core requirement: the system must be multi-agent). Zombies are scripted, non-learning NPCs                                                                                                                                                        |
+| Survivor stats                              | Per survivor: health 0-5, ammo 0-3                                                                                                                                                                                                                             |
+| Objects (>= 3)                              | Zombie, medkit, ammo crate, wall, evacuation point                                                                                                                                                                                                             |
+| Dynamic events (>= 2)                       | (1) Infection spreads to adjacent clean tiles with probability p per step. (2) Zombies move toward the nearest survivor with probability 0.7, otherwise randomly. (3) Supply drops appear every K steps on a clean tile                                        |
+| Actions                                     | Per survivor: up, down, left, right, wait, shoot (kills nearest zombie within 2 tiles in a straight line, costs 1 ammo). Joint action space is 6 x 6 = 36                                                                                                      |
+| Damage                                      | 1 health per step on an infected tile; 1 health per step while adjacent to a zombie                                                                                                                                                                            |
+| Pickups                                     | Medkit +2 health, ammo crate +1 ammo, applied on entering the tile                                                                                                                                                                                             |
+| Cooperation rules (make teamwork necessary) | (1) A medkit heals both survivors if they are adjacent when it is picked up. (2) The evacuation gate opens only when both survivors are within 1 tile of the exit at the same time. Optional: cover fire (a shot is stronger if the partner is within 2 tiles) |
+| Win                                         | Both survivors reach the evacuation tile (never infected)                                                                                                                                                                                                      |
+| Lose                                        | Either survivor's health reaches 0, or the 100-step limit is reached                                                                                                                                                                                           |
+| Reward                                      | Shared team reward: +20 both exit, -20 either dies, -0.1 per step, -1 per damage taken (any survivor), +2 per zombie killed, +1 per pickup                                                                                                                     |
+| Reproducibility                             | `reset(seed=...)` fixes the map, zombie starts and all random events; experiments use fixed seed lists                                                                                                                                                         |
+| Observability                               | Full observation in the base game                                                                                                                                                                                                                              |
+| Playable                                    | Keyboard control in Pygame for both survivors (survivor 1: arrow keys, space to shoot, key for wait; survivor 2: WASD, its own shoot and wait keys)                                                                                                            |
 
 **Seed splits:** train 0-999, validation 1000-1099, test 2000-2099, plus a separate "shifted" set for generalization.
 
@@ -46,11 +47,11 @@ A survivor (optionally two cooperating survivors) on a small city grid must reac
 
 Keep and document three representations. This is also the "actual dynamics vs learned model" distinction required by the rubric.
 
-| Use              | Representation                                                                                                                                                                                                      |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| True environment | Full grid channels (walls, infection, zombies, medkits, ammo, survivor(s), exit) plus health, ammo, time step                                                                                                       |
-| Q-learning       | Compact egocentric features: direction hint toward exit (wall-aware), infected flags for the 4 neighbours, wall flags for the 4 neighbours, nearest-zombie offset clipped to +/-3, health, ammo. Dictionary Q-table |
-| World model      | Full grid channels plus one-hot action                                                                                                                                                                              |
+| Use                       | Representation                                                                                                                                                                                                                                                                           |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| True environment          | Full grid channels (walls, infection, zombies, medkits, ammo, survivor 1, survivor 2, exit) plus each survivor's health and ammo, time step                                                                                                                                              |
+| Q-learning (per survivor) | Compact egocentric features: direction hint toward exit (wall-aware), infected flags for the 4 neighbours, wall flags for the 4 neighbours, nearest-zombie offset clipped to +/-3, own health, own ammo, partner offset clipped to +/-3, partner health. Dictionary Q-table per survivor |
+| World model               | Full grid channels plus the one-hot joint action (both survivors' actions)                                                                                                                                                                                                               |
 
 **Fairness rule:** document what each agent knows. A\* uses the current snapshot; Q-learning sees only local features; both planners get the full state.
 
@@ -58,16 +59,25 @@ Keep and document three representations. This is also the "actual dynamics vs le
 
 ## 4. Agents and Experiments
 
-| #   | Agent                               | Description                                                                                                                                                    | Course experiment |
-| --- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
-| 1   | A\*                                 | Plans on the current grid; infected tiles and tiles next to zombies have high cost; replans every step; no model of the future                                 | Exp 1             |
-| 2   | Q-learning (compulsory)             | Epsilon-greedy tabular Q-learning with decay; trained on random training maps; independent Q-tables per survivor if two survivors; DQN only if the table fails | Exp 2             |
-| 3   | True-dynamics MPC                   | Random-shooting MPC (N sequences, horizon H) using a copy of the real simulator                                                                                | Exp 3             |
-| 4   | Learned-model MPC                   | Same planner as agent 3, with imagined rollouts from the learned world model; logs predicted vs actual next state                                              | Exp 4             |
-| 5   | Uncertainty-aware MPC (improvement) | Same as agent 4, scoring each plan as `mean_return - lambda * ensemble_disagreement`                                                                           | Exp 5             |
-| -   | Generalization and robustness       | All agents evaluated on shifted conditions without retraining                                                                                                  | Exp 6             |
+| #   | Agent                               | Description                                                                                                                                                                                                                               | Course experiment |
+| --- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| 1   | A\*                                 | Plans on the current grid; infected tiles and tiles next to zombies have high cost; replans every step; no model of the future; one planner per survivor, each treating its partner as a moving obstacle (decentralized, no coordination) | Exp 1             |
+| 2   | Q-learning (compulsory)             | Epsilon-greedy tabular Q-learning with decay; trained on random training maps; one independent Q-learner per survivor (independent learners, cooperative MARL) with the shared team reward; DQN only if the table fails                   | Exp 2             |
+| 3   | True-dynamics MPC                   | Random-shooting MPC (N sequences, horizon H) searching joint actions of both survivors (36 per step) in a copy of the real simulator (centralized planning)                                                                               | Exp 3             |
+| 4   | Learned-model MPC                   | Same planner as agent 3, with imagined rollouts from the learned world model; logs predicted vs actual next state                                                                                                                         | Exp 4             |
+| 5   | Uncertainty-aware MPC (improvement) | Same as agent 4, scoring each plan as `mean_return - lambda * ensemble_disagreement`                                                                                                                                                      | Exp 5             |
+| -   | Generalization and robustness       | All agents evaluated on shifted conditions without retraining                                                                                                                                                                             | Exp 6             |
 
 **Planner defaults (tune):** N = 200-300 sequences, H = 5-8, replan every step. Shorten H before dropping to one-step lookahead if time is short.
+
+**Multi-agent requirements (core):**
+
+- The environment steps both survivors' actions simultaneously and returns a shared team reward and per-agent observations.
+- Learning: two independent Q-learners trained together. Report the learning curve for the team and note non-stationarity (each learner sees its partner as part of the environment).
+- Planning: centralized MPC over joint actions (agents 3-5). Add one decentralized variant (each survivor plans for itself and assumes a fixed or predicted partner policy) so the report can compare centralized vs decentralized coordination.
+- World model: predicts the joint next state from the joint action, so it must learn how both survivors interact with each other, the zombies and the infection.
+- Coordination metrics: team success rate, rate of both survivors reaching the gate together, average distance between survivors, and a no-coordination ablation (cooperation rules disabled or partner ignored).
+- Zombies stay scripted; there is no adversarial learning (out of scope).
 
 **Shifted conditions (Exp 6):** unseen maps, infection rate 2p, more zombies, faster zombies, fewer supplies, different wall layout.
 
@@ -76,8 +86,8 @@ Keep and document three representations. This is also the "actual dynamics vs le
 ## 5. World Model (Course Component 2 and 4)
 
 - **Formulation:** s_hat(t+1) = f_theta(s_t, a_t), plus reward and done predictions.
-- **Inputs:** state channels plus one-hot action.
-- **Outputs:** next infection map (per-cell probability), zombie moves (categorical over 5 moves per zombie, to avoid creating or losing zombies), survivor position, health, ammo, reward, done flag. Static parts (walls, exit) are copied through.
+- **Inputs:** state channels plus one-hot joint action (both survivors).
+- **Outputs:** next infection map (per-cell probability), zombie moves (categorical over 5 moves per zombie, to avoid creating or losing zombies), both survivors' positions, health and ammo, reward, done flag. Static parts (walls, exit) are copied through.
 - **Architecture:** small CNN with MLP heads for scalars. Ensemble of 3 models with different seeds and data shuffles (5 if time allows).
 - **Stochastic prediction (STORM-inspired):** imagined rollouts sample from predicted distributions.
 - **Loss:** cross-entropy for maps and categorical outputs, MSE for health, ammo and reward.
@@ -188,15 +198,15 @@ zombie-outbreak/
 | Person 3 | Data collection, world model, MPC planners, improvement                 |
 | All      | Literature, report sections, demo rehearsal                             |
 
-| Day | Goals                                                                                                                                         |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Freeze spec and interfaces (env API, state tensor shape, dataset format); skim STORM and PETS; env skeleton; repo and harness; short proposal |
-| 2   | Env complete with rule tests; A\*; Q-learning training starts; true-dynamics MPC; decide on second survivor                                   |
-| 3   | Collect about 50k transitions; train CNN; first Q-learning curve; one-step error                                                              |
-| 4   | Learned-model MPC; multi-step error; predicted-vs-actual logging; side-by-side viewer                                                         |
-| 5   | Ensemble penalty and lambda sweep; generalization runs                                                                                        |
-| 6   | Final multi-seed runs; tables and plots; accuracy-vs-decision study                                                                           |
-| 7   | Report, slides, demo rehearsal, backup video                                                                                                  |
+| Day | Goals                                                                                                                                                                                                  |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Freeze spec and interfaces (env API with two agents, joint-action format, state tensor shape, dataset format); skim STORM and PETS; env skeleton with both survivors; repo and harness; short proposal |
+| 2   | Env complete with rule tests (including cooperation rules); A\*; two independent Q-learners start training; true-dynamics MPC                                                                          |
+| 3   | Collect about 50k transitions; train CNN; first Q-learning curve; one-step error                                                                                                                       |
+| 4   | Learned-model MPC; multi-step error; predicted-vs-actual logging; side-by-side viewer                                                                                                                  |
+| 5   | Ensemble penalty and lambda sweep; generalization runs                                                                                                                                                 |
+| 6   | Final multi-seed runs; tables and plots; accuracy-vs-decision study                                                                                                                                    |
+| 7   | Report, slides, demo rehearsal, backup video                                                                                                                                                           |
 
 **Working rules:** one Git repo; merge daily; do not change the shared state format without telling everyone; write report sections as results appear; run heavy jobs overnight on Colab or Kaggle.
 
@@ -212,21 +222,24 @@ DQN (unless Q-learning fails), MCTS and CEM planners, Three.js viewer, day/night
 
 ## 14. Risks and Mitigations
 
-| Risk                                         | Mitigation                                                                     |
-| -------------------------------------------- | ------------------------------------------------------------------------------ |
-| Q-learning does not learn                    | Simplify features, shape the reward, shrink the grid, fall back to DQN         |
-| Model errors compound over long horizons     | Short horizon, replan every step, ensemble, disagreement penalty               |
-| Planner exploits model errors                | Uncertainty penalty (the improvement)                                          |
-| Sampled zombie positions become inconsistent | Predict each zombie's move as a categorical over 5 moves                       |
-| Planning too slow on CPU                     | Batch rollouts, smaller N and H, run final jobs on Colab or Kaggle             |
-| Scope creep                                  | Freeze the spec on Day 1; add stretch items only after the full pipeline works |
-| Noisy results                                | Fixed seed lists, 3+ seeds, 100 evaluation episodes per condition              |
+| Risk                                                             | Mitigation                                                                                                                         |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Q-learning does not learn                                        | Simplify features, shape the reward, shrink the grid, fall back to DQN                                                             |
+| Model errors compound over long horizons                         | Short horizon, replan every step, ensemble, disagreement penalty                                                                   |
+| Planner exploits model errors                                    | Uncertainty penalty (the improvement)                                                                                              |
+| Sampled zombie positions become inconsistent                     | Predict each zombie's move as a categorical over 5 moves                                                                           |
+| Planning too slow on CPU                                         | Batch rollouts, smaller N and H, run final jobs on Colab or Kaggle                                                                 |
+| Joint action space (36) makes search expensive                   | Random shooting over sampled joint sequences, smaller N and H; decentralized variant as a cheaper fallback                         |
+| Independent Q-learners are non-stationary and may not coordinate | Shared reward, small state features including partner offset, shrink the grid, optional parameter sharing between the two learners |
+| Survivors ignore each other (no real cooperation)                | Cooperation rules in the env (shared medkit healing, gate needing both), plus the no-coordination ablation                         |
+| Scope creep                                                      | Freeze the spec on Day 1; add stretch items only after the full pipeline works                                                     |
+| Noisy results                                                    | Fixed seed lists, 3+ seeds, 100 evaluation episodes per condition                                                                  |
 
 ---
 
 ## 15. Open Decisions
 
-1. Second cooperative survivor: include or not (decision gate: end of Day 2). Not required by the course description.
+1. (Resolved) Two cooperating survivors are a core requirement; the project must be a multi-agent system.
 2. Base-paper framing: STORM-inspired stochastic model as the "reproduction" with the ensemble penalty as the "small improvement" (current plan); confirm with the instructor if concerned.
 3. Grid size: 8x8 vs 10x10.
 4. Number of seeds: 3 minimum, 5 if time allows.
@@ -235,6 +248,9 @@ DQN (unless Q-learning fails), MCTS and CEM planners, Three.js viewer, day/night
 
 ## 16. Final Checklist (maps to the course description)
 
+- [ ] Multi-agent: two survivors acting simultaneously with a shared reward and cooperation rules
+- [ ] Two independent Q-learners trained together; team learning curve reported
+- [ ] Centralized vs decentralized planning comparison, and a no-coordination ablation
 - [ ] Playable game, >= 3 object types, >= 2 dynamic events, reset and reproducibility
 - [ ] State, action, observation, reward and transition documented
 - [ ] Q-learning trained, learning curve and multiple evaluation episodes reported
