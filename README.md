@@ -9,7 +9,7 @@ This is a course project on **learning to play by imagining**. Can an agent lear
 | # | Agent | Idea | Status |
 |---|---|---|---|
 | 1 | **A\*** | Plans a route on the current map each step; one planner per survivor | ✅ done |
-| 2 | **Q-learning** | Two independent tabular learners sharing a team reward | ⬜ |
+| 2 | **Q-learning** | Two independent tabular learners sharing a team reward | ✅ learns (12–18% both escape, from 0% untrained) |
 | 3 | **True-dynamics MPC** | Random-shooting planner over joint actions using the real simulator | ⬜ |
 | 4 | **Learned-model MPC** | The same planner, imagining futures with a learned (STORM-inspired) world model | ⬜ |
 | 5 | **Uncertainty-aware MPC** | Agent 4 plus an ensemble-disagreement penalty (our improvement) | ⬜ |
@@ -49,7 +49,13 @@ Turns are **simultaneous**: the game advances once both players have chosen an a
 python scripts/watch.py --agent astar --seed 2000 --auto
 ```
 
-The agent controls both survivors, and each survivor's planned route is drawn on the map.
+The agent controls both survivors, and each survivor's planned route is drawn on the map. To watch a trained Q-learning agent, pass its checkpoint (without `--checkpoint` it plays untrained, which is the "before" of the before/after demo):
+
+```bash
+python scripts/watch.py --agent qlearning --checkpoint checkpoints/qlearning/default_seed0.pkl --seed 2000
+```
+
+Write the command on one line. `demo_quick_seed3.pkl` in the same folder is a briefly trained agent for a first look.
 
 | Key | Action |
 |---|---|
@@ -85,7 +91,20 @@ The exact step order and edge cases are in [`docs/interfaces.md`](docs/interface
 python -m experiments.run_benchmark --agent astar --split test                          # Exp 1
 python -m experiments.run_benchmark --agent astar --split test --config no_coord        # coordination ablation
 python -m experiments.run_benchmark --agent astar --split shifted --config infection_2p --exp exp6
+python -m experiments.run_benchmark --agent qlearning --checkpoint checkpoints/qlearning/default_seed0.pkl --split test --exp exp2
+python -m experiments.run_benchmark --agent qlearning --checkpoint checkpoints/qlearning/default_seed0.pkl --split shifted --config infection_2p --exp exp6
 ```
+
+**Flags for trained agents:**
+
+| Flag | Meaning |
+|---|---|
+| `--checkpoint <file>` | Load a trained agent (for Q-learning, the Q-tables saved by `train_qlearning`). Without it, `--agent qlearning` plays untrained, which is the "before" baseline. Write the whole command on one line, with a file path after the flag. |
+| `--agent-seed <k>` | Seed for the agent's own random choices (tie-breaking). The result file name gets a `_seed<k>` suffix. Give each trained checkpoint its own value (for example `--agent-seed 1` for `default_seed1.pkl`), otherwise the CSVs of different checkpoints overwrite each other. `--out` also sets the file name. |
+| `--exp <name>` | Prefix for the result file (`exp1` by default). Use `exp2` for Q-learning and `exp6` for the generalization runs. |
+| `--episodes <n>` | Play only the first n maps of the split (a quick check). |
+
+The checkpoint remembers how it was trained (feature set, shooting mask, exit-direction head start), so you don't pass any of that when you load it. Checkpoints trained before 2026-11-24 are stale; retrain them with `--curriculum`. For the trained-agent runs in `watch.py`, use the same `--checkpoint` flag.
 
 Each run plays one full game per map seed in the split and writes one CSV row per game to `results/`. Columns include return, success, steps, deaths, damage, kills and ms per decision.
 
@@ -110,12 +129,30 @@ Each run plays one full game per map seed in the split and writes one CSV row pe
 | `fewer_supplies` | No starting items; supply drops every 25 steps |
 | `dense_walls` | 25% walls instead of 15% |
 
+### Train the Q-learning agent (Exp 2)
+
+```bash
+python -m experiments.train_qlearning --curriculum --episodes 7000 --run-seed 0    # then --run-seed 1 and 2
+python -m analysis.plots curve                                                     # mean ± std learning curve
+```
+
+Each run takes roughly 6–10 minutes on CPU, and the three seeds can run in parallel in separate terminals. It writes the learning curve to `results/exp2_qlearning_curve_default_seed<k>.csv` and the Q-tables to `checkpoints/qlearning/`. Evaluate a trained agent on any split with `python -m experiments.run_benchmark --agent qlearning --checkpoint <file> --split test`.
+
+What makes it learn (details in `docs/progress.md`, 2026-11-24):
+- **Absorbing state:** a survivor that has evacuated or died keeps learning, so the shared win reward reaches it too.
+- **Curriculum (`--curriculum`):** no hazards, then infection, then zombies, then the full game, keeping the Q-tables between stages.
+- **Features:** the `compact_t` set (neighbour hazards, exit direction, zombie direction, hp and time buckets, partner status).
+- **Training-only aids:** potential-based shaping on exit distance, `SHOOT` masking when there is no target, a head start for the exit-direction action in new states, and a decaying learning rate. Evaluation always uses the unshaped game reward, so results are comparable with A\* and the planners.
+
 ### Results so far (validation maps, 100 games)
 
 | Agent | Both escape | One escapes | Both die | Return | Steps | ms / decision |
 |---|---|---|---|---|---|---|
 | Random | 0% | 0% | 99% | −30.7 ± 1.4 | 18 | <0.1 |
 | A\* | 46% | 40% | 14% | 4.2 ± 17.6 | 21 | 0.4 |
+| Q-learning (preliminary, one seed) | 12–18% | 33–44% | 44–52% | −11 to −14 | 25 | 0.1 |
+
+The Q-learning row comes from single runs of the curriculum recipe (a scaled-down CLI run and a staged run with 7000 full-game episodes), with about ±4 points of noise from 100 maps. Replace it with the mean ± std over seeds 0–2 once you have run them.
 
 ## Project layout
 
@@ -127,14 +164,15 @@ env/            the game, pure NumPy (no pygame)
   state_encoding.py  full grid tensor, Q-learning features, world-model input
   sprites.py      pixel-art sprite data
   render_pygame.py   Renderer: sprites, animation, effects, HUD (drawing only)
-agents/         base (Agent API), random_agent, astar_agent, [qlearning, mpc_planner]
+agents/         base (Agent API), random_agent, astar_agent, qlearning_agent, [mpc_planner]
 world_model/    [dataset, model, train, eval_prediction, rollout]
-experiments/    seeds, harness (evaluation + CSV), run_benchmark, [generalization, accuracy_vs_decision]
-analysis/       [plots, tables]
+experiments/    seeds, harness (evaluation + CSV), run_benchmark, train_qlearning, [generalization, accuracy_vs_decision]
+analysis/       plots (learning curves), [tables]
 scripts/        play, watch, make_assets, [collect_data, demo_side_by_side]
 assets/         PNG sprites (reskinnable)
-tests/          rule, determinism, A* and render tests
+tests/          rule, determinism, A*, Q-learning and render tests
 results/        experiment CSVs and figures
+checkpoints/    trained agents (Q-tables; later world-model weights)
 docs/           interfaces.md (frozen contracts), progress.md (status + handoff log), images/
 report/         report and slides
 ```

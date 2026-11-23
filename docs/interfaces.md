@@ -47,12 +47,26 @@ Q-features for survivor i:
 `(exit_hint, infU, infD, infL, infR, wallU, wallD, wallL, wallR, zombie_dr, zombie_dc, own_hp, own_ammo, partner_dr, partner_dc, partner_hp)`.
 The offsets are clipped to ±3. A value of 4 means none (no zombie, or the partner has evacuated). `exit_hint` is a BFS-based direction 0..3, or 4 when on the exit or evacuated.
 
+**Compact Q-features (`state_encoding.q_features_compact`, the Q-learning default).** This is the Requirements §14 fallback, "Q-learning does not learn → simplify features". The spec set above has about 7.5×10⁸ possible values: after 10k training episodes, 25–30% of greedy decisions landed in never-seen states, and the learners did not improve. The compact set is a 13-tuple:
+`(exit_hint, nbr_U, nbr_D, nbr_L, nbr_R, here_hazard, can_shoot, zombie_dr_sign, zombie_dc_sign, hp_low, near_exit, partner, gate_open)`
+- `nbr_*`: 0 = free, 1 = hazard (infected or next to a zombie), 2 = blocked (wall, edge, zombie or partner).
+- Zombie direction is the sign of the offset to the nearest zombie, only if it is within 3 tiles (otherwise 0, 0).
+- `partner`: 0 = far from the exit, 1 = within 1 tile of it, 2 = evacuated or dead.
+
+It still contains no partner *action* or plan, so the learners stay independent. Choose with `QLearningAgent(features="spec"|"compact"|"compact_t")` or `train_qlearning.py --features`.
+
+**Extended compact set (`q_features_compact(..., extended=True)`, feature set `compact_t`, the training default).** Appends two slots to the 13-tuple: `hp_bucket` (0: hp ≤ 2, 1: hp 3-4, 2: hp 5) and `time_bucket` (0: first 25% of `max_steps`, 1: up to 60%, 2: the rest). The infection keeps spreading, so the best trade-off between safety and speed changes over the episode; without a time signal the learners dawdle around hazards until the infection covers the map.
+
+**Absorbing key for inactive survivors.** A survivor that has evacuated or died keeps its own Q-table entries so that the shared team reward (the +20 win, the +10 partial win) reaches it too. For an inactive survivor `q_features_compact` returns `(WAIT, 2, 2, 2, 2, status, 0, 0, 0, 0, 0, partner, gate_open)`, where `status` sits in the `here_hazard` slot (2 = evacuated, 3 = dead). Its only legal action is WAIT, so its bootstrap value is `Q(s', WAIT)`.
+
+**Training-only helpers (not part of the evaluation contract).** Exit-distance potential shaping (`--shaping`), `SHOOT` masking when `can_shoot = 0`, a head start for the exit-hint action in new Q rows (`--hint-prior`), per-(state, action) learning-rate decay (`--alpha-decay`) and the easy-to-hard `--curriculum`. Evaluation always uses the unshaped env reward and the greedy policy, so results stay comparable with A\* and the planners.
+
 **Fairness rule**
 
 | Agent | Sees |
 |---|---|
 | A\* | current snapshot (full grid, no future) |
-| Q-learning | only `obs["agent_i"]` |
+| Q-learning | only its own egocentric features: `obs["agent_i"]` (spec set) or `q_features_compact(state, i, cfg)` (compact set, default) |
 | MPC (all variants) | full state + a dynamics model (true sim or learned) |
 
 ## 4. Step order (resolution within one `step`)

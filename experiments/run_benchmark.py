@@ -28,13 +28,20 @@ def main() -> None:
     ap.add_argument("--episodes", type=int, default=None, help="limit number of seeds")
     ap.add_argument("--exp", default="exp1")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--checkpoint", default=None, help="trained agent file (e.g. Q-tables)")
+    ap.add_argument("--agent-seed", type=int, default=0)
     args = ap.parse_args()
 
     seeds = SPLITS[args.split][: args.episodes]
     t0 = time.perf_counter()
-    rows = evaluate(make_agent(args.agent), CONFIGS[args.config], seeds, label=args.agent,
-                    condition=args.config, split=args.split)
-    out = args.out or f"results/{args.exp}_{args.agent}_{args.config}_{args.split}.csv"
+    kw = {"seed": args.agent_seed}
+    if args.checkpoint:
+        kw["checkpoint"] = args.checkpoint
+    rows = evaluate(make_agent(args.agent, **kw), CONFIGS[args.config], seeds, label=args.agent,
+                    condition=args.config, split=args.split, agent_seed=args.agent_seed,
+                    checkpoint=args.checkpoint or "")
+    suffix = f"_seed{args.agent_seed}" if args.checkpoint or args.agent_seed else ""
+    out = args.out or f"results/{args.exp}_{args.agent}_{args.config}_{args.split}{suffix}.csv"
     write_csv(rows, out)
 
     s = summarize(rows)

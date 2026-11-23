@@ -33,10 +33,11 @@ def main() -> None:
     ap.add_argument("--speed", type=float, default=4, help="steps per second")
     ap.add_argument("--auto", action="store_true", help="advance to the next map after each episode")
     ap.add_argument("--cell", type=int, default=80)
+    ap.add_argument("--checkpoint", default=None, help="trained agent file, e.g. checkpoints/qlearning/default_seed0.pkl")
     args = ap.parse_args()
 
     env = OutbreakEnv(CONFIGS[args.config])
-    agent = make_agent(args.agent)
+    agent = make_agent(args.agent, **({"checkpoint": args.checkpoint} if args.checkpoint else {}))
     seed = args.seed
 
     pygame.init()

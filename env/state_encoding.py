@@ -123,3 +123,83 @@ def world_model_input(s: EnvState, cfg: EnvConfig, a1: int, a2: int) -> dict[str
         "zombies": zombie_array(s),
         "action": one_hot_joint_action(a1, a2),
     }
+
+
+# ------------------------------------------------- compact Q-learning view ---
+def _time_bucket(s: EnvState, cfg: EnvConfig) -> int:
+    """Coarse time pressure (0: first quarter, 1: middle, 2: last 40% of the step limit). The
+    infection keeps spreading, so the right trade-off between safety and speed changes with time."""
+    f = s.t / max(1, cfg.max_steps)
+    return 0 if f < 0.25 else 1 if f < 0.6 else 2
+
+
+def q_features_compact(s: EnvState, i: int, cfg: EnvConfig, extended: bool = False) -> tuple:
+    """Coarse egocentric features for survivor i: the Requirements.md section 14 fallback
+    ("Q-learning does not learn -> simplify features").
+
+    The spec features (q_features) have ~7.5e8 possible values, too many for a table to
+    revisit. This keeps what drives decisions and drops exact offsets:
+
+    (exit_hint,                         0..4  wall-aware direction to exit (4 = on exit / gone)
+     nbr_U, nbr_D, nbr_L, nbr_R,        0 free, 1 hazard (infected or next to a zombie), 2 blocked
+     here_hazard,                       0/1   standing on infection or next to a zombie now
+     can_shoot,                         0/1   has ammo and a zombie is in its sights
+     zombie_dr, zombie_dc,              -1/0/1 sign of offset to nearest zombie if within 3, else 0, 0
+     hp_low,                            0/1   own health <= 2
+     near_exit,                         0/1   within 1 tile of the exit
+     partner,                           0 far from exit, 1 next to/on exit, 2 evacuated or dead
+     gate_open)                         0/1
+    """
+    from .outbreak_env import shot_target  # local import: outbreak_env imports this module
+
+    j = 1 - i
+    if not s.active[i]:
+        # Absorbing state for a survivor that has left the game. It still receives the shared
+        # team reward (so the +20 win reaches the first survivor to evacuate), so the key says
+        # why it is inactive (here_hazard slot: 2 = evacuated, 3 = dead) and what its partner is doing.
+        if not s.active[j]:
+            partner_ = 2
+        else:
+            partner_ = int(np.abs(s.surv_pos[j] - s.exit_pos).sum() <= 1)
+        base_ = (WAIT, 2, 2, 2, 2, 3 if s.health[i] <= 0 else 2, 0, 0, 0, 0, 0, partner_,
+                 int(s.gate_open))
+        return base_ + (0, _time_bucket(s, cfg)) if extended else base_
+    h, w = s.walls.shape
+    r, c = (int(v) for v in s.surv_pos[i])
+    zp = s.zombie_pos[s.zombie_alive]
+    zombie_cells = {(int(a), int(b)) for a, b in zp}
+    near_zombie = {(a + dr, b + dc) for a, b in zombie_cells for dr, dc in MOVE_DELTAS[:4]}
+    partner_cell = (int(s.surv_pos[j, 0]), int(s.surv_pos[j, 1])) if s.active[j] else None
+
+    nbrs = []
+    for dr, dc in MOVE_DELTAS[:4]:
+        cell = (r + dr, c + dc)
+        if (not (0 <= cell[0] < h and 0 <= cell[1] < w) or s.walls[cell]
+                or cell in zombie_cells or cell == partner_cell):
+            nbrs.append(2)
+        elif s.infection[cell] or cell in near_zombie:
+            nbrs.append(1)
+        else:
+            nbrs.append(0)
+    here_hazard = int(bool(s.infection[r, c]) or (r, c) in near_zombie)
+    can_shoot = int(s.ammo[i] > 0 and shot_target(s, cfg, i) is not None)
+
+    zdr = zdc = 0
+    if len(zp):
+        d = zp - s.surv_pos[i]
+        k = int(np.argmin(np.abs(d).sum(axis=1)))
+        if np.abs(d[k]).sum() <= 3:
+            zdr, zdc = int(np.sign(d[k, 0])), int(np.sign(d[k, 1]))
+
+    ex = s.exit_pos
+    near_exit = int(abs(r - ex[0]) + abs(c - ex[1]) <= 1)
+    if not s.active[j]:
+        partner = 2
+    else:
+        partner = int(np.abs(s.surv_pos[j] - ex).sum() <= 1)
+    base = (_exit_hint(s, i), *nbrs, here_hazard, can_shoot, zdr, zdc,
+            int(s.health[i] <= 2), near_exit, partner, int(s.gate_open))
+    if not extended:
+        return base
+    hp = int(s.health[i])
+    return base + (0 if hp <= 2 else 1 if hp <= 4 else 2, _time_bucket(s, cfg))
