@@ -68,7 +68,10 @@ class OutbreakEnv(gym.Env):
         self.state = generate_map(self.config, self._rng)
         return self._obs(), self._info(events=None)
 
-    def step(self, action):
+    def step(self, action, build_obs: bool = True):
+        """Advance one step. ``build_obs=False`` (planner rollouts) skips building the
+        observation and info dicts and returns ``(None, reward, terminated, truncated, None)``.
+        The state transition and RNG use are identical either way."""
         s, cfg = self.state, self.config
         if s is None:
             raise RuntimeError("call reset() before step()")
@@ -190,6 +193,8 @@ class OutbreakEnv(gym.Env):
         truncated = (not terminated) and s.t >= cfg.max_steps
         s.done = terminated or truncated
 
+        if not build_obs:
+            return None, float(reward), terminated, truncated, None
         return (self._obs(), float(reward), terminated, truncated,
                 self._info(ev, won=won, lost=lost, partial=partial))
 

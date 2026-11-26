@@ -1,5 +1,6 @@
 from .astar_agent import AStarAgent
 from .base import Agent
+from .mpc_planner import MPCAgent
 from .qlearning_agent import QLearningAgent
 from .random_agent import RandomAgent
 
@@ -8,6 +9,7 @@ AGENTS: dict[str, type[Agent]] = {
     "random": RandomAgent,
     "astar": AStarAgent,
     "qlearning": QLearningAgent,
+    "mpc": MPCAgent,
 }
 
 
@@ -17,4 +19,4 @@ def make_agent(name: str, **kwargs) -> Agent:
     return AGENTS[name](**kwargs)
 
 
-__all__ = ["Agent", "RandomAgent", "AStarAgent", "QLearningAgent", "AGENTS", "make_agent"]
+__all__ = ["Agent", "RandomAgent", "AStarAgent", "QLearningAgent", "MPCAgent", "AGENTS", "make_agent"]

@@ -286,3 +286,24 @@ def test_miss_still_spends_ammo():
     _, _, _, _, info = env.step((WAIT, SHOOT))
     assert info["events"]["shots"] == [False, True] and info["events"]["shot_targets"] == [-1, -1]
     assert env.state.ammo[1] == 0
+
+def test_build_obs_false_gives_identical_transitions():
+    """step(..., build_obs=False) (used by planner rollouts) must not change the dynamics."""
+    from env import DEFAULT_CONFIG
+
+    a, b = OutbreakEnv(DEFAULT_CONFIG), OutbreakEnv(DEFAULT_CONFIG)
+    a.reset(seed=1000)
+    b.reset(seed=1000)
+    rng = np.random.default_rng(0)
+    for _ in range(60):
+        act = (int(rng.integers(6)), int(rng.integers(6)))
+        _, ra, ta, ua, _ = a.step(act)
+        obs, rb, tb, ub, info = b.step(act, build_obs=False)
+        assert obs is None and info is None and (ra, ta, ua) == (rb, tb, ub)
+        for k in ("infection", "medkits", "ammo_crates", "surv_pos", "health", "ammo", "evacuated",
+                  "zombie_pos", "zombie_alive"):
+            assert np.array_equal(getattr(a.state, k), getattr(b.state, k)), k
+        assert (a.state.t, a.state.gate_open, a.state.done) == (b.state.t, b.state.gate_open, b.state.done)
+        assert a._rng.bit_generator.state == b._rng.bit_generator.state
+        if ta or ua:
+            break

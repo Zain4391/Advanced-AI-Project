@@ -70,6 +70,12 @@ def _exit_hint(s: EnvState, i: int) -> int:
     return best
 
 
+def exit_hint(s: EnvState, i: int) -> int:
+    """Public name for the exit hint: direction 0..3 that decreases the BFS distance
+    to the exit, or WAIT (4) when no move does (on the exit, evacuated or dead)."""
+    return _exit_hint(s, i)
+
+
 def _clip_offset(d: np.ndarray) -> tuple[int, int]:
     return int(np.clip(d[0], -CLIP, CLIP)), int(np.clip(d[1], -CLIP, CLIP))
 

@@ -20,6 +20,7 @@ sim = env.clone()           # independent env (for true-dynamics MPC)
 sim.reseed_dynamics(k)      # different sampled future from the same state
 ```
 
+- `env.step(action, build_obs=False)` skips building the observation and info dicts and returns `(None, reward, terminated, truncated, None)`. The transition and RNG use are identical (tested in `tests/test_rules.py`). Planner rollouts use it; building obs took about 38% of step time. The default (`True`) is unchanged.
 - `reward` is a single shared team reward (float).
 - `info = {seed, t, won, lost, gate_open, events}`, where `events = {kills, pickups, damage[2], shots[2], shot_targets[2] (zombie slot hit, -1 = miss), zombie_moves[(moves_per_step, max_zombies)]}`. `env.outbreak_env.shot_target(state, cfg, i)` returns what survivor i would hit right now.
 - `info["events"]["zombie_moves"]` holds the realized 0..4 move per zombie slot. **This is the world-model training target.**
@@ -121,8 +122,35 @@ One compressed `.npz` per collection run, stored in `data/` (gitignored; share v
 - **Outputs:** per-cell infection probability; a 5-way categorical per zombie slot (dead slots masked out of the loss); both survivors' positions, health and ammo; reward; done. Walls and the exit are copied through.
 - **Supply drops:** these are random and hard to predict, so they are excluded from the loss. The model copies the item maps forward minus picked-up items. This simplification is stated in the report.
 
+## 7b. Planner dynamics contract (`agents/mpc_planner.py`, Exp 3/4/5)
+
+One `MPCAgent` serves Exp 3, 4 and 5; only its `dynamics` backend changes. A backend implements
+
+```python
+def rollout(self, env, sequences, seeds) -> RolloutBatch: ...
+# sequences: [N, H, 2] int joint actions; seeds: [N] int, one sampled future per row
+```
+
+It rolls every row out from the env's current state for up to H steps, stopping at `terminated` or `truncated`, and must not mutate the live env. Rows with the same seed and the same actions must give the same result, because the planner relies on common random numbers. `TrueSimDynamics` (Exp 3) is the only backend allowed to call `env.clone()`, `get_state()` and `reseed_dynamics()`. A learned backend may read `env.state` at the root, like any planner, but has no RNG state and no future.
+
+| `RolloutBatch` field | shape | meaning |
+|---|---|---|
+| `rewards` | `[N, H]` float | team reward of step t; 0 after the rollout ended |
+| `dones` | `[N, H]` bool | True from the step on which the rollout ended |
+| `final_pos` | `[N, 2, 2]` int | survivor positions at the last state |
+| `final_hp` | `[N, 2]` int | health at the last state |
+| `final_evacuated` | `[N, 2]` bool | evacuated at the last state |
+| `final_done` | `[N]` bool | the rollout ended (terminated or truncated) within H |
+| `disagreement` | `[N]` float | ensemble disagreement; zeros for the true simulator (Exp 5 fills it) |
+| `pos` (optional) | `[N, H, 2, 2]` int | positions after each step, only for drawing the plan |
+
+Scoring (`score_rollouts`) uses only the batch and the static `exit_dist`: `sum_t gamma^t r_t`, plus, if the rollout did not end, the leaf `-0.5 * (d1 + d2) + 2 * (hp1 + hp2)` (d = BFS distance to the exit, 0 once evacuated, 0 for a dead survivor, whose hp counts as 0), minus `lam * disagreement`. The distance weight 0.5 is `leaf_dist_weight` (default 0.5; 1.5 and 3 were worse on val, see `docs/progress.md` 2026-11-25).
+
+Sampler: an independent categorical per (step, survivor) over the 6 actions, starting with `p_hint` on the root exit-hint direction (`state_encoding.exit_hint`) and the rest uniform. `SHOOT` gets probability 0 without ammo at the root, and inactive survivors always `WAIT`. `iters > 1` refits the categoricals to the top `elite_frac` sequences (`smoothing` keeps that share of the old ones): this is the CEM variant. The executed action is the first joint action of the best-scoring sequence over all iterations.
+
 ## 8. Results CSV (`experiments/harness.py`)
 
 One row per episode with the columns:
 `seed, agent, return, success, steps, lost, truncated, kills, damage, pickups, mean_partner_dist, gate_open_step, ms_per_decision`, plus any extra keys passed to `evaluate(...)` (e.g. `run_seed`, `condition`, `lambda`, `H`, `N`).
+`run_benchmark.py` also writes `workers` and, for agents with a `csv_extra` property, its settings. The MPC adds `N, H, iters, lam, p_hint, n_futures, leaf, dynamics`. With `--workers K` the map seeds are split across K spawn processes, and the merged rows are sorted by seed and identical to `--workers 1` apart from `ms_per_decision` and `workers`.
 File naming: `results/exp{N}_{agent}_{condition}.csv`.

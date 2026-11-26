@@ -10,7 +10,7 @@ This is a course project on **learning to play by imagining**. Can an agent lear
 |---|---|---|---|
 | 1 | **A\*** | Plans a route on the current map each step; one planner per survivor | ✅ done |
 | 2 | **Q-learning** | Two independent tabular learners sharing a team reward | ✅ learns (12–18% both escape, from 0% untrained) |
-| 3 | **True-dynamics MPC** | Random-shooting planner over joint actions using the real simulator | ⬜ |
+| 3 | **True-dynamics MPC** | Random-shooting planner over joint actions using the real simulator | ✅ done (36% both escape on test; A\* 50%) |
 | 4 | **Learned-model MPC** | The same planner, imagining futures with a learned (STORM-inspired) world model | ⬜ |
 | 5 | **Uncertainty-aware MPC** | Agent 4 plus an ensemble-disagreement penalty (our improvement) | ⬜ |
 
@@ -151,8 +151,25 @@ What makes it learn (details in `docs/progress.md`, 2026-11-24):
 | Random | 0% | 0% | 99% | −30.7 ± 1.4 | 18 | <0.1 |
 | A\* | 46% | 40% | 14% | 4.2 ± 17.6 | 21 | 0.4 |
 | Q-learning (preliminary, one seed) | 12–18% | 33–44% | 44–52% | −11 to −14 | 25 | 0.1 |
+| True-dynamics MPC (N=200, H=8) | 44% | 30% | 19% | 1.7 ± 20.4 | 38 | 608¹ |
 
 The Q-learning row comes from single runs of the curriculum recipe (a scaled-down CLI run and a staged run with 7000 full-game episodes), with about ±4 points of noise from 100 maps. Replace it with the mean ± std over seeds 0–2 once you have run them.
+
+¹ Measured with 8 worker processes sharing the CPU; 355 ms with 4 workers on test.
+
+### Test maps (100 games, final configs)
+
+| Agent | Both escape | One escapes | Both die | Out of time | Return | Steps | ms / decision |
+|---|---|---|---|---|---|---|---|
+| A\* | 50% | 45% | 5% | 0% | 7.7 ± 14.7 | 19 | 0.5 |
+| Q-learning (seed 0) | 12% | 41% | 47% | 0% | −13.3 | 32 | 0.1 |
+| True-dynamics MPC (N=200, H=8, iters=1, p_hint=0.5) | 36% | 34% | 22% | 8% | −1.3 ± 20.2 | 40 | 355 |
+
+MPC plans both survivors together in a copy of the real simulator, but it trails A\* by 14 ± 6 points (paired over the same maps). It is safer per step and slower: on maps both agents win it takes 30 steps against 19, which gives the infection and zombies time to catch up. Run it with:
+
+```bash
+python -m experiments.run_benchmark --agent mpc --split test --exp exp3 --workers 4 --agent-kwargs "n_samples=200,horizon=8,iters=1,p_hint=0.5,leaf=true"
+```
 
 ## Project layout
 

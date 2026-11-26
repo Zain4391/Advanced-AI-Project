@@ -20,6 +20,7 @@ import pygame  # noqa: E402
 from agents import AGENTS, make_agent  # noqa: E402
 from env import DEFAULT_CONFIG, NO_COORD_CONFIG, SHIFTED_CONFIGS, OutbreakEnv  # noqa: E402
 from env.render_pygame import C, Renderer  # noqa: E402
+from experiments.run_benchmark import parse_kwargs  # noqa: E402
 
 CONFIGS = {"default": DEFAULT_CONFIG, "no_coord": NO_COORD_CONFIG, **SHIFTED_CONFIGS}
 SPEEDS = [0.5, 1, 2, 4, 8, 16]
@@ -34,10 +35,14 @@ def main() -> None:
     ap.add_argument("--auto", action="store_true", help="advance to the next map after each episode")
     ap.add_argument("--cell", type=int, default=80)
     ap.add_argument("--checkpoint", default=None, help="trained agent file, e.g. checkpoints/qlearning/default_seed0.pkl")
+    ap.add_argument("--agent-kwargs", default="", help='e.g. "n_samples=200,horizon=8" for --agent mpc')
     args = ap.parse_args()
 
     env = OutbreakEnv(CONFIGS[args.config])
-    agent = make_agent(args.agent, **({"checkpoint": args.checkpoint} if args.checkpoint else {}))
+    kw = parse_kwargs(args.agent_kwargs)
+    if args.checkpoint:
+        kw["checkpoint"] = args.checkpoint
+    agent = make_agent(args.agent, **kw)
     seed = args.seed
 
     pygame.init()

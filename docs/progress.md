@@ -16,7 +16,7 @@ Newest entry at the top. At the end of every work session (human or Claude), add
 | Plots / tables | P2 | 🟡 `analysis/plots.py curve` (learning curve) |
 | Data collection | P3 | ⬜ |
 | World model (CNN + ensemble) | P3 | ⬜ |
-| MPC: true dynamics / learned / uncertainty | P3 | ⬜ |
+| MPC: true dynamics / learned / uncertainty | P3 | ✅ true dynamics (Exp 3): test 36% / 34% / 22% (8% truncated), A\* 50% / 45% / 5%. Learned / uncertainty ⬜ |
 | Side-by-side demo viewer | P1 | ⬜ |
 | Report / slides | All | ⬜ |
 
@@ -28,6 +28,86 @@ Newest entry at the top. At the end of every work session (human or Claude), add
 
 ## Known performance notes
 - True simulator: ~3.4k steps/s, so MPC with N=200, H=6 takes about 350 ms per decision on CPU. Optimize later if needed (vectorize zombie moves, or roll out N states as a batch).
+
+---
+
+## 2026-11-27: Exp 3 final test run
+**Chosen config:** N=200, H=8, iters=1, p_hint=0.5, gamma=0.98, n_futures=1, leaf on, leaf_dist_weight=0.5 (spec), lam=0. Best val success (44%, tied with p_hint 0.7). Remaining sweep configs (N 400, iters=3) were skipped after the diagnosis below showed the score, not the search, is the bottleneck.
+
+**Test (100 maps, `results/exp3_mpc_default_test.csv`, `--workers 4`):**
+
+| Agent | Success | Partial | Lost | Truncated | Return | Steps | ms/decision |
+|---|---|---|---|---|---|---|---|
+| MPC (true dynamics) | 36% | 34% | 22% | 8% | -1.27 ± 20.18 | 40.4 | 355 |
+| A\* | 50% | 45% | 5% | 0% | 7.72 ± 14.71 | 19.4 | 0.5 |
+| Q-learning (seed 0) | 12% | 41% | 47% | 0% | -13.29 | 31.8 | 0.1 |
+
+- Paired over the same maps, MPC trails A\* by 14 ± 6 points (std. error), so on test the gap is real; on val it was 2 points. MPC wins 14 maps A\* does not, A\* wins 28 that MPC does not.
+- Same pattern as val: on the 22 maps both win, MPC takes 30.1 steps vs 19.4.
+- 355 ms per decision with 4 workers, under the 0.5 s target.
+
+**Next:** Exp 4 (data collection, world model) reuses this planner and config with a learned `Dynamics` backend; compare against this row. Open: the leaf loophole fix (dead survivor counts with a fixed distance) is a team decision; if adopted, rerun Exp 3 val + test so Exp 4/5 compare against the same score. Shifted configs (Exp 6) not run yet. Nothing committed.
+
+---
+
+## 2026-11-25: Exp 3 true-dynamics MPC built; val sweep paused (resume here)
+**Code (nothing committed yet):**
+- `agents/mpc_planner.py`: `RolloutBatch`, the `Dynamics` protocol, `TrueSimDynamics`, `score_rollouts` / `leaf_value`, the categorical sampler with CEM refit (`iters` > 1), and `MPCAgent` (registered as `"mpc"`). Identical sequences are rolled out once (under common random numbers they give identical results). `agent.paths` shows the best plan in `watch.py`. Contract in `docs/interfaces.md` §7b.
+- `env/outbreak_env.py`: `step(action, build_obs=False)` skips obs and info (they took about 38% of step time). No rule change; equivalence test in `tests/test_rules.py`.
+- `env/state_encoding.exit_hint` (public alias of `_exit_hint`).
+- `experiments/run_benchmark.py`: `--agent-kwargs "k=v,..."` and `--workers K` (spawn processes, rows sorted by seed, identical to K=1). Adds `workers` plus the agent's `csv_extra` columns (`N, H, iters, lam, p_hint, n_futures, leaf, dynamics`).
+- `experiments/time_mpc.py` (ms per decision, N × H grid) and `experiments/diagnose_failures.py` (attributes each death to infection or zombies, counts truncations and gate waits). `scripts/watch.py` takes `--agent-kwargs`.
+- `tests/test_mpc.py`: 14 tests. The full suite passes (80 tests).
+
+**ms per decision (single process, 12 fixed states):**
+
+| N \ H | 6 | 8 | 12 |
+|---|---|---|---|
+| 100 | 142 | 170 | 229 |
+| 200 | 239 | 321 | 617 |
+| 400 | 576 | 774 | 916 |
+
+What's left is the rule code itself (zombie moves, infection spread), not the planner.
+
+**Val results so far (100 maps):**
+
+| Config | Success | Partial | Lost | Truncated | ms/decision |
+|---|---|---|---|---|---|
+| MPC base (N=200, H=8, iters=1, p_hint=0.5, leaf on) | 44% | 30% | 19% | 7% | 608 (8 workers sharing the CPU) |
+| p_hint 0.3 | 37% | 33% | 17% | 13% | 682 |
+| p_hint 0.7 | 44% | 30% | 21% | 5% | 563 |
+| leaf off | 41% | 24% | 21% | 14% | 546 |
+| H 6 | 42% | 33% | 19% | 6% | 422 |
+| H 12 | 38% | 37% | 18% | 7% | 698 |
+| N 100 | 39% | 29% | 29% | 3% | 257 |
+| A\* | 46% | 40% | 14% | 0% | 0.4 |
+| Q-learning | 12-18% | 33-44% | 44-52% | – | – |
+
+Base MPC ties A\* (±5 points on 100 maps). It runs out of time on 7% of maps, where A\* never does. That points to dawdling or a gate deadlock near the exit.
+
+A\* failure diagnosis (`diagnose_failures --agent astar`): 68 deaths. The dead took 318 damage from zombies and 34 from infection; 21 episodes had 5 or more gate-wait steps.
+
+**Failure diagnosis, base config (2026-11-26, `diagnose_failures`, records in `results/scratch/exp3_diag/`):** MPC is too slow, not stuck at the gate.
+- On the 24 maps both agents win, MPC takes 29.9 steps vs 19.8 for A\*. It takes less damage (1.6 vs 2.5) and picks up more items (1.8 vs 1.1). Gate opens at step 29 vs 19 on average.
+- Over all maps total damage is the same (5.2 each). The slower pace hands the time back to the infection and zombies: MPC's dead took 79 infection damage vs 34 for A\*, and they die later (median t 25 vs 15) and farther from the exit (median 9 tiles vs 6).
+- Of the 7 time-outs, 6 are a lone survivor (partner dead) still wandering 7-14 tiles from the exit at t = 100, with 75-85% of the map infected. Only 1 (seed 1035) is a gate deadlock: one survivor waited on the exit for 45 steps while the partner stayed 12 tiles away.
+- Likely cause: the score. In the leaf, one tile of progress is worth +0.5, while one hit costs 3 (2 in the leaf, 1 in the reward), so the planner avoids any risk instead of advancing. And an 8-step horizon cannot see that waiting lets the infection grow. More samples or CEM optimize the same objective, so they are unlikely to help.
+- The two agents fail on different maps: MPC wins 20 maps that A\* doesn't win, and A\* wins 22 that MPC doesn't.
+
+**Leaf distance weight test (val, 100 maps, N=200, H=8; new `leaf_dist_weight` kwarg, default 0.5 = spec):**
+
+| leaf_dist_weight | Success | Partial | Lost | Truncated | Return | Deaths/ep |
+|---|---|---|---|---|---|---|
+| 0.5 (base) | 44% | 30% | 19% | 7% | 1.65 | 0.73 |
+| 1.5 | 37% | 45% | 17% | 1% | 0.26 | 0.80 |
+| 3 | 14% | 53% | 32% | 1% | -8.81 | 1.18 |
+
+A stronger pull removes the time-outs, but success drops and partial escapes rise. Likely reason (inferred, not tested): the leaf excludes dead survivors from the distance term, so a far-away survivor dying removes `w * d` of penalty. At w = 3 and d ≈ 10 that is worth more than the -10 death cost, so the planner stops protecting the trailing survivor. Keep 0.5 unless the leaf is changed (e.g. a dead survivor counts with a fixed distance), which is a team decision because Exp 4/5 reuse the score.
+
+**Resume tomorrow:**
+1. (2026-11-26: 7 of 9 done, table above. Claude Code stopped the run for low system memory during N 400, and the partial N 400 output was deleted. Consider `--workers 4` in `sweep.sh` to use less memory.) `bash results/scratch/exp3_sweep/sweep.sh` runs the remaining configs (N 400, and iters=3 with N=100) and skips finished ones. About 5.5 min per config with 8 workers. To stop it, kill the bash script as well as the python processes; stopping only the Python workers lets the script start the next config.
+2. `python -m experiments.diagnose_failures --agent mpc --agent-kwargs "<best>" --workers 4` to see whether the truncations are gate deadlocks.
+3. Pick the final config, time it with `--workers 4` (target < 0.5 s), and run it once on TEST with `--exp exp3`. Then update the README tables.
 
 ---
 
